@@ -1,0 +1,5 @@
+${PACKAGE} (${VERSION}-1) unstable; urgency=medium
+
+  * Upstream release ${VERSION}
+
+ -- ${MAINTAINER}  ${DATE}

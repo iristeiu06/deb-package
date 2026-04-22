@@ -1,0 +1,25 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	# No configuration needed
+
+override_dh_auto_build:
+	# No build needed - files are pre-built
+
+override_dh_auto_install:
+	# Files are already in place, dh_install will handle them
+
+override_dh_strip:
+	# Pre-built binaries; skip stripping
+
+override_dh_dwz:
+	# Pre-built binaries; skip dwz
+
+override_dh_makeshlibs:
+	# Pre-built firmware; no shared library processing needed
+
+override_dh_builddeb:
+	dh_builddeb -- -Zgzip

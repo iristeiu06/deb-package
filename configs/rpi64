@@ -1,0 +1,19 @@
+# Package metadata
+PACKAGE=adi-gmsl-rpi-boot
+ARCHITECTURE=arm64
+MAINTAINER="Engineerzone <https://ez.analog.com>"
+HOMEPAGE="https://github.com/analogdevicesinc/linux"
+DESCRIPTION="Analog Devices boot files for Raspberry Pi 64-bit"
+LONG_DESCRIPTION="This package contains the custom Raspberry Pi boot files from Analog Devices for 64-bit architecture."
+
+# Download configuration
+SERVER=https://swdownloads.analog.com
+FILE_VERSION=cse/linux_rpi/gmsl/rpi-6.13.y
+BOOT=rpi_latest_boot_64bit.tar.gz
+MODULES=rpi_modules_64bit.tar.gz
+
+# Source information
+VERSION_BOOTFILES=rpi_archives_properties.txt
+RPI_REPO=https://github.com/analogdevicesinc/linux
+ARCHITECTURE_SOURCE="arm64"
+
