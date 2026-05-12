@@ -1,4 +1,4 @@
-${PACKAGE} (${VERSION}-1) unstable; urgency=medium
+${PACKAGE} (${VERSION}) unstable; urgency=medium
 
   * Upstream release ${VERSION}
 
