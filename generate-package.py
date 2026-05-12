@@ -39,9 +39,7 @@ def download_rpi_boot_files(config_data, build_dir):
     url = f"{config_data.get('SERVER')}/{config_data.get('FILE_VERSION')}/{config_data.get('BOOT')}"
     logger.info(f"Downloading boot files from {url}...")
     subprocess.run(["wget", "--progress=bar:force:noscroll", url], check=True)
-    if tarfile.is_tarfile(config_data.get('BOOT')):
-        with tarfile.open(config_data.get('BOOT'), "r:*") as tar:
-            tar.extractall(path=f"{build_dir}/boot/firmware")
+    subprocess.run(["tar", "xzf", config_data.get('BOOT'), "--strip-components=2", "-C", f"{build_dir}/boot/firmware"], check=True)
     os.remove(config_data.get('BOOT'))
 
 
@@ -103,6 +101,20 @@ def create_preinst_file(config_data, debian_dir, dirs, files):
     os.chmod(f"{debian_dir}/preinst", 0o755)
 
 
+GMSL_CONFIG_MARKER = "dtoverlay=gmsl-pi5"
+GMSL_CONFIG_BLOCK = """\n# GMSL overlays
+[pi5]
+dtoverlay=gmsl-pi5
+dtoverlay=rpi-regulator
+
+[pi4]
+dtoverlay=gmsl-pi4
+
+[all]
+# End GMSL overlays
+"""
+
+
 def crate_postinst_file(config_data, debian_dir, files):
     preinst_diversions_str = ""
     for file in files:
@@ -114,7 +126,13 @@ def crate_postinst_file(config_data, debian_dir, files):
                             f"PACKAGE_DIVERT=\"{config_data.get('PACKAGE')}-temp\"\n\n"
                             "# Remove old files and diversions\n"
                             f"{preinst_diversions_str}\n\n"
-                            "rm -rf /usr/share/${PACKAGE_DIVERT}\n"
+                            "rm -rf /usr/share/${PACKAGE_DIVERT}\n\n"
+                            "CONFIG_FILE=\"/boot/firmware/config.txt\"\n"
+                            f"if [ ! -f \"$CONFIG_FILE\" ]; then\n"
+                            f"    printf '%s' '{GMSL_CONFIG_BLOCK}' > \"$CONFIG_FILE\"\n"
+                            f"elif ! grep -q \"{GMSL_CONFIG_MARKER}\" \"$CONFIG_FILE\"; then\n"
+                            f"    printf '%s' '{GMSL_CONFIG_BLOCK}' >> \"$CONFIG_FILE\"\n"
+                            "fi\n\n"
                             "sync\n\n"
                             "#DEBHELPER#\n\n"
                             "exit 0\n")
@@ -122,10 +140,28 @@ def crate_postinst_file(config_data, debian_dir, files):
     os.chmod(f"{debian_dir}/postinst", 0o755)
 
 
+def create_postrm_file(debian_dir):
+    with open(f"{debian_dir}/postrm", "w") as postrm_file:
+        postrm_file.write("#!/bin/bash -e\n\n"
+                          "# Remove GMSL overlay configuration from config.txt\n"
+                          "CONFIG_FILE=\"/boot/firmware/config.txt\"\n"
+                          "if [ -f \"$CONFIG_FILE\" ]; then\n"
+                          "    sed -i '/# GMSL overlays/,/# End GMSL overlays/d' \"$CONFIG_FILE\"\n"
+                          "fi\n\n"
+                          "#DEBHELPER#\n\n"
+                          "exit 0\n")
+
+    os.chmod(f"{debian_dir}/postrm", 0o755)
+
+
 def create_debian_files(config_data, build_dir):
     logger.info("Creating Debian packaging files...")
     debian_dir = f"{build_dir}/debian"
-    os.makedirs(debian_dir)
+    os.makedirs(f"{debian_dir}/source")
+
+    with open(f"{debian_dir}/source/format", "w") as f:
+        f.write("3.0 (quilt)\n")
+
     shutil.copyfile("debian-templates/copyright-rpi.in", f"{debian_dir}/copyright")
 
     env_substitute_file("debian-templates/control.in", f"{debian_dir}/control")
@@ -145,6 +181,63 @@ def create_debian_files(config_data, build_dir):
 
     create_preinst_file(config_data, debian_dir, dirs, files)
     crate_postinst_file(config_data, debian_dir, files)
+    create_postrm_file(debian_dir)
+
+
+def get_rpi_sources(config_data, orig_tarball):
+    logger.info("Getting Raspberry Pi sources...")
+    download_rpi_version_file(config_data)
+    version_file_path = config_data.get('VERSION_BOOTFILES')
+
+    git_sha = ""
+    with open(version_file_path, "r") as version_file:
+        for line in version_file:
+            if line.startswith("git_sha="):
+                git_sha = line.split("=", 1)[1].strip()
+                break
+    os.remove(version_file_path)
+
+    if not git_sha:
+        raise RuntimeError("Could not find git_sha in version file")
+
+    logger.info(f"Downloading Linux sources from git sha {git_sha}...")
+    subprocess.run(["wget", "--progress=bar:force:noscroll", "-O", orig_tarball,
+                    f"{config_data.get('RPI_REPO')}/archive/{git_sha}.tar.gz"], check=True)
+
+
+def generate_package_source(config, version):
+    logger.info(f"######################### {config} sources for version {version}")
+    config_data = export_env_variable(config)
+    os.environ['VERSION'] = version
+
+    build_dir = f"{config_data.get('PACKAGE')}-{version}-src"
+
+    upstream_version = version.rsplit("-", 1)[0]
+    orig_tarball = f"{config_data.get('PACKAGE')}_{upstream_version}.orig.tar.gz"
+
+    get_rpi_sources(config_data, orig_tarball)
+
+    shutil.rmtree(build_dir) if os.path.exists(build_dir) else None
+    os.mkdir(build_dir)
+
+    subprocess.run(["tar", "xzf", orig_tarball, "-C", build_dir, "--strip-components=1"], check=True)
+
+    download_artifacts_rpi(config_data, build_dir)
+    create_debian_files(config_data, build_dir)
+
+    shutil.rmtree(f"{build_dir}/boot", ignore_errors=True)
+    shutil.rmtree(f"{build_dir}/lib/modules", ignore_errors=True)
+
+    os.chdir(build_dir)
+    logger.info("Building source package...")
+    subprocess.run(["dpkg-buildpackage", "-us", "-uc", "-S", "-d"], check=True)
+
+    os.chdir("..")
+    os.remove(f"{config_data.get('PACKAGE')}_{version}_source.buildinfo")
+    os.remove(f"{config_data.get('PACKAGE')}_{version}_source.changes")
+    shutil.rmtree(build_dir, ignore_errors=True)
+
+    logger.info(f"Source package: {config_data.get('PACKAGE')}_{version}.dsc")
 
 
 def generate_package_binary(config, version):
@@ -164,17 +257,27 @@ def generate_package_binary(config, version):
     subprocess.run(["dpkg-buildpackage", "-us", "-uc", "-b", f"-a{config_data.get('ARCHITECTURE')}"], check=True)
 
     os.chdir("..")
-    os.remove(f"{config_data.get('PACKAGE')}_{version}-1_{config_data.get('ARCHITECTURE')}.buildinfo")
-    os.remove(f"{config_data.get('PACKAGE')}_{version}-1_{config_data.get('ARCHITECTURE')}.changes")
+    os.remove(f"{config_data.get('PACKAGE')}_{version}_{config_data.get('ARCHITECTURE')}.buildinfo")
+    os.remove(f"{config_data.get('PACKAGE')}_{version}_{config_data.get('ARCHITECTURE')}.changes")
 
-    logger.info(f"Binary package: {config_data.get('PACKAGE')}_{version}-1_{config_data.get('ARCHITECTURE')}.deb")
+    logger.info(f"Binary package: {config_data.get('PACKAGE')}_{version}_{config_data.get('ARCHITECTURE')}.deb")
 
 
 def main():
-    version = datetime.datetime.now().strftime("%d-%m-%Y")
-    config = "rpi64"
-    generate_package_binary(config, version)
-    logger.info(f"Package for {config} generated successfully.")
+    parser = argparse.ArgumentParser(description="Generate a Debian package from a given source directory")
+    parser.add_argument("--version", type=str, default=datetime.datetime.now().strftime("%d-%m-%Y"),
+                        help="Version of the package to be generated")
+    parser.add_argument("--config", type=str, default="rpi64",
+                        help="Name of the configuration file")
+    parser.add_argument("--build_type", type=str, choices=["sources", "binary", "both"], default="binary",
+                        help="Type of package to build (sources, binary, or both)")
+    args = parser.parse_args()
+
+    if args.build_type in ("binary", "both"):
+        generate_package_binary(args.config, args.version)
+    if args.build_type in ("sources", "both"):
+        generate_package_source(args.config, args.version)
+    logger.info(f"Package for {args.config} generated successfully.")
 
 
 if __name__ == "__main__":
