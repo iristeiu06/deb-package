@@ -39,7 +39,7 @@ def download_rpi_boot_files(config_data, build_dir):
     url = f"{config_data.get('SERVER')}/{config_data.get('FILE_VERSION')}/{config_data.get('BOOT')}"
     logger.info(f"Downloading boot files from {url}...")
     subprocess.run(["wget", "--progress=bar:force:noscroll", url], check=True)
-    subprocess.run(["tar", "xzf", config_data.get('BOOT'), "--strip-components=2", "-C", f"{build_dir}/boot/firmware"], check=True)
+    subprocess.run(["tar", "xzf", config_data.get('BOOT'), "--strip-components=1", "-C", f"{build_dir}/boot/firmware"], check=True)
     os.remove(config_data.get('BOOT'))
 
 

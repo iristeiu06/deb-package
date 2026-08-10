@@ -8,7 +8,8 @@ LONG_DESCRIPTION="This package contains the custom Raspberry Pi boot files from 
 
 # Download configuration
 SERVER=https://swdownloads.analog.com
-FILE_VERSION=cse/linux_rpi/gmsl/rpi-6.13.y
+FILE_VERSION=cse/linux_rpi/gmsl
+# FILE_VERSION=cse/linux_rpi/gmsl/rpi-6.13.y
 BOOT=rpi_latest_boot_64bit.tar.gz
 MODULES=rpi_modules_64bit.tar.gz
 
